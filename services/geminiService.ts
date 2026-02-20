@@ -1,12 +1,10 @@
 import OpenAI from 'openai';
-import { supabase } from './supabaseClient';
 
 // ============================================================
-// AI Client Setup
+// AI Client Setup — Direct connection to Zhipu AI
 // ============================================================
 
 const getAIClient = () => {
-    // Priority: 1) env var  2) localStorage (legacy fallback)
     const apiKey = import.meta.env.VITE_ZHIPU_API_KEY
         || localStorage.getItem('GEMINI_API_KEY')
         || '';
@@ -16,53 +14,22 @@ const getAIClient = () => {
     }
 
     return new OpenAI({
-        apiKey: apiKey,
+        apiKey,
         baseURL: 'https://open.bigmodel.cn/api/paas/v4/',
         dangerouslyAllowBrowser: true
     });
 };
 
 // ============================================================
-// Helper: Call AI via Edge Function (preferred) or direct (fallback)
+// Core AI Call — Direct to Zhipu AI API
 // ============================================================
 
 const callAI = async (messages: any[], options?: {
     model?: string;
     responseFormat?: any;
 }): Promise<string> => {
-    const model = options?.model || 'glm-4-flash';
+    const model = options?.model || 'glm-4-plus';
 
-    // Try Edge Function first (production mode)
-    try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-
-        if (session && supabaseUrl) {
-            const response = await fetch(`${supabaseUrl}/functions/v1/ai-proxy`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${session.access_token}`,
-                },
-                body: JSON.stringify({
-                    model,
-                    messages,
-                    response_format: options?.responseFormat,
-                }),
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                return data.content || '';
-            }
-            // If Edge Function fails, fall through to direct call
-            console.warn('Edge Function call failed, falling back to direct API call');
-        }
-    } catch (e) {
-        console.warn('Edge Function unavailable, using direct API call');
-    }
-
-    // Fallback: Direct API call (local development)
     const ai = getAIClient();
     const completion = await ai.chat.completions.create({
         model,
@@ -82,6 +49,7 @@ You are "UniApply Luxe", a premium study abroad consultant.
 Your tone is professional, encouraging, and concise.
 Your goal is to collect user background information (GPA, Major, Experience, Target School).
 When the user uploads a file or types info, acknowledge it and briefly summarize what you understood.
+Always respond in Chinese (中文).
 `;
 
 export const sendKnowledgeMessage = async (
@@ -102,7 +70,7 @@ export const sendKnowledgeMessage = async (
     } catch (error: any) {
         console.error("GLM API Error:", error);
         if (error.message === "API_KEY_MISSING") return "API_KEY_MISSING";
-        return "Network error. Please try again.";
+        return "网络错误，请重试。";
     }
 };
 
@@ -149,11 +117,12 @@ export const generateQuestionnaire = async (appType: string, specialReq: string,
                 
                 Output Format: Markdown.
                 Include 5-7 deep, reflective questions tailored to their background to help them write a personal statement.
+                Please write in Chinese (中文).
                 `
             }
         ]);
     } catch (e) {
-        return "Failed to generate questionnaire.";
+        return "问卷生成失败，请重试。";
     }
 };
 
@@ -178,7 +147,6 @@ export const generateCollegeRecommendations = async (userContext: string) => {
         ], { responseFormat: { type: "json_object" } });
 
         const parsed = JSON.parse(content || '{"universities":[]}');
-        // Handle both direct array and wrapped object
         if (Array.isArray(parsed)) return parsed;
         return parsed.universities || Object.values(parsed)[0] || [];
     } catch (e) {
@@ -195,12 +163,18 @@ export const generateResumeCode = async (currentCode: string, instruction: strin
     try {
         const prompt = userContext
             ? `
-            You are a LaTeX expert.
+            You are a LaTeX expert specializing in professional resumes.
             User Profile Data: ${userContext}
             
-            Task: REWRITE the following LaTeX resume code to populate it with the User Profile Data provided above.
-            If the user profile is empty, keep the template but maybe add placeholders.
-            Maintain the exact structure and formatting.
+            Task: REWRITE the following LaTeX resume code to populate it with the User Profile Data.
+            
+            IMPORTANT RULES:
+            - You MUST use the custom commands already defined in the template: \\resumeSubheading{Title}{Right1}{Subtitle}{Right2}, \\resumeItem{text}, \\resumeItemWithTitle{Title}{Description}
+            - Wrap sections with \\resumeSubHeadingListStart / \\resumeSubHeadingListEnd
+            - Wrap bullet items with \\resumeItemListStart / \\resumeItemListEnd
+            - Keep the \\begin{center} heading block format with name and contact info
+            - If user profile is empty, keep the template structure with placeholder content
+            - Maintain all \\usepackage and preamble definitions exactly as they are
             
             Current Code:
             \`\`\`latex
@@ -210,13 +184,13 @@ export const generateResumeCode = async (currentCode: string, instruction: strin
             Return ONLY raw LaTeX code.
             `
             : `
-            You are a LaTeX expert.
+            You are a LaTeX expert specializing in professional resumes.
             Current Code:
             \`\`\`latex
             ${currentCode}
             \`\`\`
             User Instruction: ${instruction}
-            Task: Modify the code based on instruction. Return ONLY raw LaTeX code.
+            Task: Modify the code based on instruction. You MUST keep using the custom commands (\\resumeSubheading, \\resumeItem, \\resumeItemWithTitle, \\resumeSubHeadingListStart/End, \\resumeItemListStart/End). Return ONLY raw LaTeX code.
             `;
 
         let text = await callAI([{ role: "user", content: prompt }]);
@@ -247,7 +221,7 @@ export const generateEssay = async (prompt: string, context: string) => {
                 Output: Just the essay text.
                 `
             }
-        ], { model: 'glm-4' });
+        ]);
     } catch (error) {
         console.error("GLM Essay Error:", error);
         return "生成失败，请重试。";
@@ -265,7 +239,7 @@ export const scoreEssay = async (essayText: string) => {
                 vocabulary (number 0-100)
                 fluency (number 0-100)
                 structure (number 0-100)
-                critique (array of strings)
+                critique (array of strings, in Chinese)
                 ONLY RETURN JSON.
                 `
             }

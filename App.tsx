@@ -3,7 +3,7 @@ import {
     Diamond, MessageSquare, FileText, PenTool, School, Zap, Send,
     Paperclip, Bot, Download, ChevronRight, RefreshCw, History,
     CheckCircle2, Sparkles, Undo, Redo, User, Settings, ArrowRight,
-    FileUp, Save, Loader2, LogOut
+    FileUp, Save, Loader2, LogOut, Trash2, AlertTriangle
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { AppSection, Message, EssayScore, College, UserProfile } from './types';
@@ -15,8 +15,8 @@ import {
 import {
     loadUserProfile, saveUserProfile, loadChatHistory, saveChatMessage,
     clearChatHistory, loadCollegeRecommendations, saveCollegeRecommendations,
-    loadResume, saveResume, loadEssays, saveEssay
-} from './services/databaseService';
+    loadResume, saveResume, loadEssays, saveEssay, clearAllUserData
+} from './services/localStorageService';
 import { supabase } from './services/supabaseClient';
 import ReactMarkdown from 'react-markdown';
 import { AutoFill } from './AutoFill';
@@ -25,27 +25,90 @@ import type { Session } from '@supabase/supabase-js';
 
 // --- Constants ---
 
-const INITIAL_LATEX = `\\documentclass{resume}
-\\usepackage{fontspec}
-\\usepackage[margin=0.75in]{geometry}
+const INITIAL_LATEX = `\\documentclass[a4paper,11pt]{article}
 
-\\name{YOUR NAME}
-\\contact{email@example.com | Phone | Location}
+\\usepackage{latexsym}
+\\usepackage[empty]{fullpage}
+\\usepackage{titlesec}
+\\usepackage{marvosym}
+\\usepackage[usenames,dvipsnames]{color}
+\\usepackage{verbatim}
+\\usepackage{enumitem}
+\\usepackage[hidelinks]{hyperref}
+\\usepackage{fancyhdr}
+\\usepackage[T1]{fontenc}
+\\usepackage{charter}
 
-\\section*{EDUCATION}
-\\textbf{University Name} \\hfill Location
-\\textit{Degree} \\hfill Date
-\\begin{itemize}
-  \\item GPA: ...
-  \\item Relevant Coursework: ...
-\\end{itemize}
+\\usepackage[left=0.4in, right=0.4in, top=0.4in, bottom=0.4in]{geometry}
 
-\\section*{EXPERIENCE}
-\\textbf{Company Name} \\hfill Location
-\\textit{Role} \\hfill Date
-\\begin{itemize}
-  \\item Description of achievements...
-\\end{itemize}
+\\pagestyle{fancy}
+\\fancyhf{}
+\\fancyfoot{}
+\\renewcommand{\\headrulewidth}{0pt}
+\\renewcommand{\\footrulewidth}{0pt}
+
+\\urlstyle{same}
+\\raggedbottom
+\\raggedright
+\\setlength{\\tabcolsep}{0in}
+
+\\titleformat{\\section}{
+  \\vspace{-10pt}\\scshape\\raggedright\\large\\bfseries
+}{}{0em}{}[\\color{black}\\titlerule \\vspace{-6pt}]
+
+\\newcommand{\\resumeItem}[1]{\\item\\small{#1 \\vspace{-2pt}}}
+\\newcommand{\\resumeItemWithTitle}[2]{\\item\\small{\\textbf{#1}{: #2 \\vspace{-2pt}}}}
+\\newcommand{\\resumeSubheading}[4]{
+  \\vspace{-2pt}\\item
+    \\begin{tabular*}{0.97\\textwidth}[t]{l@{\\extracolsep{\\fill}}r}
+      \\textbf{#1} & \\textbf{#2} \\\\
+      \\textit{\\small#3} & \\textit{\\small #4} \\\\
+    \\end{tabular*}\\vspace{-7pt}
+}
+\\newcommand{\\resumeSubHeadingListStart}{\\begin{itemize}[leftmargin=0.15in, label={}]}
+\\newcommand{\\resumeSubHeadingListEnd}{\\end{itemize}\\vspace{-8pt}}
+\\newcommand{\\resumeItemListStart}{\\begin{itemize}[leftmargin=0.15in, label={\\tiny$\\bullet$}, labelsep=2pt, itemsep=1pt, topsep=0pt, parsep=0pt]}
+\\newcommand{\\resumeItemListEnd}{\\end{itemize}\\vspace{-4pt}}
+
+\\begin{document}
+
+\\begin{center}
+    \\textbf{\\Huge \\scshape YOUR NAME} \\\\ \\vspace{3pt}
+    \\small City, Country $|$ Phone $|$ \\href{mailto:email@example.com}{\\underline{email@example.com}} $|$ \\href{https://yourwebsite.com}{\\underline{yourwebsite.com}}
+\\end{center}
+\\vspace{-10pt}
+
+\\section{Education}
+  \\resumeSubHeadingListStart
+    \\resumeSubheading
+      {University Name}{City, Country}
+      {Degree Title}{Date Range}
+      \\resumeItemListStart
+        \\resumeItem{\\textbf{Academics}: GPA / Ranking}
+        \\resumeItem{\\textbf{Relevant Coursework}: Course 1, Course 2, Course 3.}
+      \\resumeItemListEnd
+  \\resumeSubHeadingListEnd
+
+\\section{Experience}
+  \\resumeSubHeadingListStart
+    \\resumeSubheading
+      {Company / Organization}{City, Country}
+      {Role Title}{Date Range}
+      \\resumeItemListStart
+        \\resumeItem{Description of your work and achievements...}
+      \\resumeItemListEnd
+  \\resumeSubHeadingListEnd
+
+\\section{Skills}
+  \\resumeSubHeadingListStart
+    \\resumeSubheading{Technical Proficiency}{}{}{}
+    \\vspace{-17pt}
+    \\resumeItemListStart
+      \\item{\\small{\\textbf{Programming}: Languages and frameworks}}
+      \\item{\\small{\\textbf{Languages}: Native language, Other languages}}
+    \\resumeItemListEnd
+  \\resumeSubHeadingListEnd
+
 \\end{document}`;
 
 // --- Components ---
@@ -104,11 +167,12 @@ const Sidebar = ({ activeSection, setActiveSection, onOpenSettings, onLogout }: 
 // --- KnowledgeBase ---
 
 const KnowledgeBase = ({
-    userProfile, setUserProfile, onNavigate
+    userProfile, setUserProfile, onNavigate, userId
 }: {
     userProfile: UserProfile,
     setUserProfile: (p: UserProfile) => void,
-    onNavigate: (s: AppSection) => void
+    onNavigate: (s: AppSection) => void,
+    userId: string
 }) => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
@@ -122,25 +186,22 @@ const KnowledgeBase = ({
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
-    // Load chat history from DB
+    // Load chat history from localStorage
     useEffect(() => {
-        const load = async () => {
-            const history = await loadChatHistory();
-            if (history.length > 0) {
-                setMessages(history);
-            } else {
-                const welcomeMsg: Message = {
-                    id: 'welcome',
-                    role: 'ai',
-                    content: '欢迎回到您的私人留学知识库。请告诉我您的基本情况（GPA、专业、目标），或者直接上传您的成绩单/简历。',
-                    timestamp: Date.now()
-                };
-                setMessages([welcomeMsg]);
-            }
-            setIsLoading(false);
-        };
-        load();
-    }, []);
+        const history = loadChatHistory(userId);
+        if (history.length > 0) {
+            setMessages(history);
+        } else {
+            const welcomeMsg: Message = {
+                id: 'welcome',
+                role: 'ai',
+                content: '欢迎回到您的私人留学知识库。请告诉我您的基本情况（GPA、专业、目标），或者直接上传您的成绩单/简历。',
+                timestamp: Date.now()
+            };
+            setMessages([welcomeMsg]);
+        }
+        setIsLoading(false);
+    }, [userId]);
 
     const handleSend = async () => {
         if (!input.trim() && flowState !== 'SELECT_TYPE') return;
@@ -150,14 +211,14 @@ const KnowledgeBase = ({
         if (flowState === 'SPECIAL_REQ') {
             const userMsg: Message = { id: Date.now().toString(), role: 'user', content: currentInput, timestamp: Date.now() };
             setMessages(prev => [...prev, userMsg]);
-            await saveChatMessage(userMsg);
+            saveChatMessage(userId, userMsg);
             setIsThinking(true);
 
             const fullContext = JSON.stringify(userProfile) + `\nAdditional Special Req: ${currentInput}`;
             const questionnaire = await generateQuestionnaire(userProfile.applicationType || "General", currentInput, fullContext);
             const updatedProfile = { ...userProfile, specialRequests: currentInput, questionnaire };
             setUserProfile(updatedProfile);
-            await saveUserProfile(updatedProfile);
+            saveUserProfile(userId, updatedProfile);
 
             const aiMsg: Message = {
                 id: (Date.now() + 1).toString(),
@@ -167,7 +228,7 @@ const KnowledgeBase = ({
                 timestamp: Date.now()
             };
             setMessages(prev => [...prev, aiMsg]);
-            await saveChatMessage(aiMsg);
+            saveChatMessage(userId, aiMsg);
             setFlowState('DONE');
             setIsThinking(false);
             return;
@@ -175,7 +236,7 @@ const KnowledgeBase = ({
 
         const userMsg: Message = { id: Date.now().toString(), role: 'user', content: currentInput, timestamp: Date.now() };
         setMessages(prev => [...prev, userMsg]);
-        await saveChatMessage(userMsg);
+        saveChatMessage(userId, userMsg);
         setIsThinking(true);
 
         const apiHistory = messages.filter(m => !m.type).map(m => ({
@@ -188,13 +249,13 @@ const KnowledgeBase = ({
 
         const aiMsg: Message = { id: (Date.now() + 1).toString(), role: 'ai', content: responseText, timestamp: Date.now() };
         setMessages(prev => [...prev, aiMsg]);
-        await saveChatMessage(aiMsg);
+        saveChatMessage(userId, aiMsg);
 
         const extracted = await extractUserProfile(JSON.stringify([...apiHistory, { role: 'user', parts: [{ text: currentInput }] }]));
         if (extracted.name || extracted.gpa || extracted.major) {
             const updatedProfile = { ...userProfile, ...extracted, rawText: (userProfile.rawText || '') + '\n' + currentInput };
             setUserProfile(updatedProfile);
-            await saveUserProfile(updatedProfile);
+            saveUserProfile(userId, updatedProfile);
         }
     };
 
@@ -208,30 +269,16 @@ const KnowledgeBase = ({
             attachments: [{ name: file.name, type: file.type, size: (file.size / 1024).toFixed(1) + 'KB' }]
         };
         setMessages(prev => [...prev, userMsg]);
-        saveChatMessage(userMsg);
+        saveChatMessage(userId, userMsg);
         setIsThinking(true);
 
-        // Actually read the file content
+        // Read file content
         const reader = new FileReader();
         reader.onload = async (event) => {
             let fileText = event.target?.result as string || '';
 
-            // For PDFs, FileReader gives binary — extract readable text portions
-            if (file.type === 'application/pdf') {
-                // Extract ASCII text from PDF binary (basic but functional extraction)
-                const bytes = new Uint8Array(event.target?.result as ArrayBuffer);
-                const rawStr = Array.from(bytes).map(b => b > 31 && b < 127 ? String.fromCharCode(b) : ' ').join('');
-                // Extract text between BT/ET markers and parentheses in PDF
-                const textMatches = rawStr.match(/\(([^)]+)\)/g);
-                if (textMatches) {
-                    fileText = textMatches.map(m => m.slice(1, -1)).join(' ');
-                } else {
-                    fileText = rawStr.replace(/\s{2,}/g, ' ').trim().substring(0, 5000);
-                }
-            }
-
             // Truncate if too long
-            const truncatedText = fileText.substring(0, 6000);
+            const truncatedText = fileText.substring(0, 8000);
 
             // Send the real file content to AI for analysis
             const apiHistory = messages.filter(m => !m.type).map(m => ({
@@ -265,7 +312,7 @@ ${truncatedText}
                 timestamp: Date.now()
             };
             setMessages(prev => [...prev, aiMsg]);
-            await saveChatMessage(aiMsg);
+            saveChatMessage(userId, aiMsg);
 
             // Extract profile from the file content + AI analysis
             const fullContext = JSON.stringify([
@@ -280,7 +327,7 @@ ${truncatedText}
                 rawText: (userProfile.rawText || '') + '\n' + truncatedText
             };
             setUserProfile(updatedProfile);
-            await saveUserProfile(updatedProfile);
+            saveUserProfile(userId, updatedProfile);
         };
 
         reader.onerror = () => {
@@ -293,12 +340,8 @@ ${truncatedText}
             setMessages(prev => [...prev, errMsg]);
         };
 
-        // Read as text for txt/doc files, as ArrayBuffer for PDFs
-        if (file.type === 'application/pdf') {
-            reader.readAsArrayBuffer(file);
-        } else {
-            reader.readAsText(file);
-        }
+        // Read all files as text
+        reader.readAsText(file);
     };
 
     const startApplicationFlow = () => {
@@ -316,7 +359,7 @@ ${truncatedText}
     const handleSelection = async (value: string) => {
         const updatedProfile = { ...userProfile, applicationType: value as any };
         setUserProfile(updatedProfile);
-        await saveUserProfile(updatedProfile);
+        saveUserProfile(userId, updatedProfile);
         setFlowState('SPECIAL_REQ');
         setMessages(prev => [...prev, {
             id: Date.now().toString(), role: 'ai',
@@ -460,26 +503,21 @@ ${truncatedText}
 
 // --- ResumeBuilder ---
 
-const ResumeBuilder = ({ userProfile }: { userProfile: UserProfile }) => {
+const ResumeBuilder = ({ userProfile, userId }: { userProfile: UserProfile, userId: string }) => {
     const [latexCode, setLatexCode] = useState(INITIAL_LATEX);
     const [instruction, setInstruction] = useState('');
     const [isEditing, setIsEditing] = useState(false);
     const [isGenerating, setIsGenerating] = useState(false);
-    const [resumeId, setResumeId] = useState<string | undefined>();
     const hasGeneratedRef = useRef(false);
 
-    // Load from DB
+    // Load from localStorage
     useEffect(() => {
-        const load = async () => {
-            const saved = await loadResume();
-            if (saved) {
-                setLatexCode(saved.latexCode);
-                setResumeId(saved.id);
-                hasGeneratedRef.current = true;
-            }
-        };
-        load();
-    }, []);
+        const saved = loadResume(userId);
+        if (saved) {
+            setLatexCode(saved.latexCode);
+            hasGeneratedRef.current = true;
+        }
+    }, [userId]);
 
     useEffect(() => {
         const autoGen = async () => {
@@ -490,7 +528,7 @@ const ResumeBuilder = ({ userProfile }: { userProfile: UserProfile }) => {
                 setLatexCode(newCode);
                 hasGeneratedRef.current = true;
                 setIsGenerating(false);
-                await saveResume(newCode, 'My Resume', resumeId);
+                saveResume(userId, newCode, 'My Resume');
             }
         };
         autoGen();
@@ -503,7 +541,221 @@ const ResumeBuilder = ({ userProfile }: { userProfile: UserProfile }) => {
         setLatexCode(newCode);
         setInstruction('');
         setIsEditing(false);
-        await saveResume(newCode, 'My Resume', resumeId);
+        saveResume(userId, newCode, 'My Resume');
+    };
+
+    // Parse LaTeX to structured preview data (handles both old and new template formats)
+    const parseLatex = (code: string) => {
+        type Entry = { heading: string; subheading: string; right1: string; right2: string; bullets: string[] };
+        type ParsedSection = { title: string; entries: Entry[] };
+        const result: { name: string; contact: string; sections: ParsedSection[] } = {
+            name: '', contact: '', sections: []
+        };
+
+        try {
+            const lines = code.split('\n');
+            let currentSection: ParsedSection | null = null;
+            let currentEntry: Entry | null = null;
+            let inCenter = false;
+
+            const cleanTex = (s: string): string => {
+                return s
+                    .replace(/\\textbf\{(.+?)\}/g, '<b>$1</b>')
+                    .replace(/\\textit\{(.+?)\}/g, '<i>$1</i>')
+                    .replace(/\\emph\{(.+?)\}/g, '<i>$1</i>')
+                    .replace(/\\underline\{(.+?)\}/g, '$1')
+                    .replace(/\\href\{[^}]*\}\{(.+?)\}/g, '$1')
+                    .replace(/\\small\s*/g, '')
+                    .replace(/\$\|\$/g, ' | ')
+                    .replace(/\\vspace\{[^}]*\}/g, '')
+                    .replace(/\\Huge\s*/g, '')
+                    .replace(/\\scshape\s*/g, '')
+                    .replace(/\\\\/g, '')
+                    .replace(/[{}]/g, '')
+                    .trim();
+            };
+
+            const ensureEntry = () => {
+                if (!currentEntry && currentSection) {
+                    currentEntry = { heading: '', subheading: '', right1: '', right2: '', bullets: [] };
+                    currentSection.entries.push(currentEntry);
+                }
+            };
+
+            for (let i = 0; i < lines.length; i++) {
+                const trimmed = lines[i].trim();
+                if (!trimmed) continue;
+
+                // Skip preamble/commands
+                if (trimmed.startsWith('\\documentclass') || trimmed.startsWith('\\usepackage') ||
+                    trimmed.startsWith('\\pagestyle') || trimmed.startsWith('\\fancyhf') ||
+                    trimmed.startsWith('\\renewcommand') || trimmed.startsWith('\\urlstyle') ||
+                    trimmed.startsWith('\\raggedbottom') || trimmed.startsWith('\\raggedright') ||
+                    trimmed.startsWith('\\setlength') || trimmed.startsWith('\\titleformat') ||
+                    trimmed.startsWith('\\newcommand') || trimmed.startsWith('%') ||
+                    trimmed === '\\begin{document}' || trimmed === '\\end{document}' ||
+                    trimmed.startsWith('\\resumeSubHeadingListStart') || trimmed.startsWith('\\resumeSubHeadingListEnd') ||
+                    trimmed.startsWith('\\resumeItemListStart') || trimmed.startsWith('\\resumeItemListEnd') ||
+                    trimmed.startsWith('\\begin{itemize}') || trimmed.startsWith('\\end{itemize}')) {
+                    continue;
+                }
+
+                // Heading block: \begin{center} ... \end{center}
+                if (trimmed === '\\begin{center}') { inCenter = true; continue; }
+                if (trimmed === '\\end{center}') { inCenter = false; continue; }
+                if (inCenter) {
+                    const text = cleanTex(trimmed);
+                    if (text && !result.name) result.name = text;
+                    else if (text && !result.contact) result.contact = text;
+                    continue;
+                }
+
+                // Old format: \name{} and \contact{}
+                const nameMatch = trimmed.match(/\\name\{(.+?)\}/);
+                if (nameMatch) { result.name = nameMatch[1]; continue; }
+                const contactMatch = trimmed.match(/\\contact\{(.+?)\}/);
+                if (contactMatch) { result.contact = contactMatch[1]; continue; }
+
+                // Section
+                const sectionMatch = trimmed.match(/\\section\*?\{(.+?)\}/);
+                if (sectionMatch) {
+                    currentSection = { title: sectionMatch[1], entries: [] };
+                    result.sections.push(currentSection);
+                    currentEntry = null;
+                    continue;
+                }
+
+                if (!currentSection) continue;
+
+                // New format: \resumeSubheading{arg1}{arg2}{arg3}{arg4}
+                if (trimmed.startsWith('\\resumeSubheading')) {
+                    let block = trimmed;
+                    let j = i + 1;
+                    // Collect lines until we have at least 4 { characters (to find 4 arguments)
+                    while (j < lines.length && (block.match(/\{/g) || []).length < 5) {
+                        block += ' ' + lines[j].trim();
+                        j++;
+                    }
+                    // Skip first { which belongs to \resumeSubheading itself
+                    const firstBrace = block.indexOf('{', block.indexOf('\\resumeSubheading'));
+                    const argsBlock = block.substring(firstBrace);
+                    const args: string[] = [];
+                    let depth = 0; let start = -1;
+                    for (let k = 0; k < argsBlock.length; k++) {
+                        if (argsBlock[k] === '{') { if (depth === 0) start = k + 1; depth++; }
+                        if (argsBlock[k] === '}') { depth--; if (depth === 0 && start >= 0) { args.push(argsBlock.substring(start, k)); start = -1; } }
+                        if (args.length === 4) break;
+                    }
+                    i = j - 1;
+                    if (args.length >= 4) {
+                        currentEntry = {
+                            heading: cleanTex(args[0]), right1: cleanTex(args[1]),
+                            subheading: cleanTex(args[2]), right2: cleanTex(args[3]),
+                            bullets: []
+                        };
+                        currentSection.entries.push(currentEntry);
+                    }
+                    continue;
+                }
+
+                // Old format: \textbf{Title} \hfill Location — creates a new entry
+                const oldHeading = trimmed.match(/\\textbf\{(.+?)\}\s*\\hfill\s*(.+)/);
+                if (oldHeading) {
+                    currentEntry = {
+                        heading: cleanTex(oldHeading[1]), right1: cleanTex(oldHeading[2]),
+                        subheading: '', right2: '', bullets: []
+                    };
+                    currentSection.entries.push(currentEntry);
+                    continue;
+                }
+
+                // Old format: \textit{Subtitle} \hfill Date — updates current entry's subtitle
+                const oldSubheading = trimmed.match(/\\textit\{(.+?)\}\s*\\hfill\s*(.+)/);
+                if (oldSubheading && currentEntry) {
+                    currentEntry.subheading = cleanTex(oldSubheading[1]);
+                    currentEntry.right2 = cleanTex(oldSubheading[2]);
+                    continue;
+                }
+
+                // Bullet: \resumeItemWithTitle{Title}{Description}
+                const itemWithTitle = trimmed.match(/\\resumeItemWithTitle\{(.+?)\}\s*\{(.+)\}/);
+                if (itemWithTitle) {
+                    ensureEntry();
+                    currentEntry!.bullets.push(`<b>${cleanTex(itemWithTitle[1])}</b>: ${cleanTex(itemWithTitle[2])}`);
+                    continue;
+                }
+
+                // Bullet: \resumeItem{text}
+                const resumeItem = trimmed.match(/\\resumeItem\{(.+)\}/);
+                if (resumeItem) {
+                    ensureEntry();
+                    currentEntry!.bullets.push(cleanTex(resumeItem[1]));
+                    continue;
+                }
+
+                // Bullet: \item{\small{text}} or \item text
+                const rawSmallItem = trimmed.match(/\\item\{\\small\{(.+)\}\}/);
+                if (rawSmallItem) {
+                    ensureEntry();
+                    currentEntry!.bullets.push(cleanTex(rawSmallItem[1]));
+                    continue;
+                }
+
+                const plainItem = trimmed.match(/\\item\s+(.+)/);
+                if (plainItem && !trimmed.includes('tabular')) {
+                    ensureEntry();
+                    currentEntry!.bullets.push(cleanTex(plainItem[1]));
+                    continue;
+                }
+            }
+        } catch (e) {
+            console.error('parseLatex error:', e);
+        }
+        return result;
+    };
+
+    const parsed = parseLatex(latexCode);
+
+    const handleExportPDF = () => {
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) { alert('请允许弹窗以导出 PDF'); return; }
+
+        const entriesHTML = (entries: typeof parsed.sections[0]['entries']) => entries.map(e => `
+            <div class="entry">
+                <div class="entry-row"><span class="entry-title">${e.heading}</span><span class="entry-right">${e.right1}</span></div>
+                ${e.subheading ? `<div class="entry-row"><span class="entry-sub">${e.subheading}</span><span class="entry-sub-right">${e.right2}</span></div>` : ''}
+                ${e.bullets.length > 0 ? `<ul class="bullets">${e.bullets.map(b => `<li>${b}</li>`).join('')}</ul>` : ''}
+            </div>
+        `).join('');
+
+        printWindow.document.write(`<!DOCTYPE html><html><head><title>${parsed.name || 'Resume'}</title>
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Charter:wght@400;700&family=Inter:wght@300;400;500;600&display=swap');
+            * { margin:0; padding:0; box-sizing:border-box; }
+            body { font-family:'Inter','Charter',Georgia,serif; color:#111; padding:36px 40px; max-width:800px; margin:0 auto; line-height:1.45; font-size:11px; }
+            h1 { font-size:24px; font-weight:700; text-align:center; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px; }
+            .contact { font-size:10px; text-align:center; color:#444; margin-bottom:14px; }
+            .section-title { font-size:12px; text-transform:uppercase; font-weight:700; border-bottom:1.5px solid #111; padding-bottom:2px; margin:14px 0 6px 0; letter-spacing:1px; }
+            .entry { margin-bottom:6px; }
+            .entry-row { display:flex; justify-content:space-between; }
+            .entry-title { font-weight:700; font-size:11px; }
+            .entry-right { font-weight:700; font-size:11px; }
+            .entry-sub { font-style:italic; font-size:10px; }
+            .entry-sub-right { font-style:italic; font-size:10px; }
+            .bullets { margin:3px 0 0 16px; padding:0; }
+            .bullets li { font-size:10.5px; line-height:1.55; margin-bottom:1px; }
+            .bullets li b { font-weight:600; }
+            @media print { body { padding:32px 36px; } @page { margin: 0.3in; } }
+        </style></head><body>
+        <h1>${parsed.name || 'YOUR NAME'}</h1>
+        <div class="contact">${parsed.contact || 'email@example.com'}</div>
+        ${parsed.sections.map(s => `
+            <div class="section-title">${s.title}</div>
+            ${entriesHTML(s.entries)}
+        `).join('')}
+        </body></html>`);
+        printWindow.document.close();
+        setTimeout(() => { printWindow.print(); }, 500);
     };
 
     return (
@@ -516,7 +768,7 @@ const ResumeBuilder = ({ userProfile }: { userProfile: UserProfile }) => {
                 </div>
                 <div className="flex gap-4">
                     <button className="flex items-center gap-2 text-xs text-luxe-text-muted hover:text-white transition-colors"><Undo className="w-4 h-4" /> 撤销</button>
-                    <button className="flex items-center gap-2 px-4 py-1.5 bg-white text-black text-xs font-bold rounded-full hover:bg-luxe-gold transition-colors"><Download className="w-4 h-4" /> 导出 PDF</button>
+                    <button onClick={handleExportPDF} className="flex items-center gap-2 px-4 py-1.5 bg-white text-black text-xs font-bold rounded-full hover:bg-luxe-gold transition-colors"><Download className="w-4 h-4" /> 导出 PDF</button>
                 </div>
             </div>
 
@@ -543,28 +795,46 @@ const ResumeBuilder = ({ userProfile }: { userProfile: UserProfile }) => {
                     </div>
                 </div>
 
-                <div className="w-1/2 bg-[#2a2a2e] relative flex items-center justify-center p-8 overflow-hidden">
+                <div className="w-1/2 bg-[#2a2a2e] relative flex items-start justify-center p-8 overflow-auto">
                     <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5"></div>
-                    <div className="bg-paper text-black w-[500px] h-[700px] shadow-2xl rounded-[1px] p-10 overflow-hidden transform scale-90 lg:scale-100 transition-transform origin-center relative">
-                        <div className="h-full flex flex-col pointer-events-none opacity-90">
-                            <div className="text-center border-b-2 border-black pb-4 mb-4">
-                                <h1 className="text-3xl font-serif font-bold tracking-tight mb-1">{userProfile.name || "YOUR NAME"}</h1>
-                                <p className="text-[10px] font-sans uppercase tracking-widest text-gray-600">contact@email.com • {userProfile.gpa ? `GPA: ${userProfile.gpa}` : "Location"}</p>
-                            </div>
-                            <div className="space-y-5">
-                                <div>
-                                    <h3 className="text-[10px] font-sans font-bold uppercase tracking-widest text-gray-400 mb-2 border-b border-gray-200 pb-1">Education</h3>
-                                    <div className="flex justify-between items-baseline">
-                                        <span className="font-serif font-bold text-sm">Target University</span>
-                                        <span className="font-sans text-[10px] text-gray-500">2024 — 2028</span>
-                                    </div>
-                                    <p className="text-[10px] text-gray-700 italic mt-1">This preview is a simulation. The final PDF will be rendered precisely from LaTeX.</p>
-                                </div>
-                                <div className="flex-1 flex items-center justify-center text-gray-300 text-xs uppercase tracking-widest">
-                                    [ Real-time PDF Rendering Preview ]
-                                </div>
-                            </div>
+                    <div className="bg-white text-black w-[500px] min-h-[700px] shadow-2xl rounded-[1px] p-8 relative" style={{ fontFamily: "'Georgia', 'Charter', serif", fontSize: '10px' }}>
+                        <div className="text-center border-b-2 border-black pb-2 mb-3">
+                            <h1 className="text-xl font-bold tracking-wide uppercase mb-1">{parsed.name || 'YOUR NAME'}</h1>
+                            <p className="text-[9px] text-gray-500">{parsed.contact || 'email@example.com | Phone | Location'}</p>
                         </div>
+                        {parsed.sections.length > 0 ? parsed.sections.map((section, i) => (
+                            <div key={i} className="mb-3">
+                                <h3 className="text-[11px] font-bold uppercase tracking-[1.5px] border-b border-black pb-0.5 mb-2">{section.title}</h3>
+                                {section.entries.map((entry, j) => (
+                                    <div key={j} className="mb-2">
+                                        <div className="flex justify-between text-[10px]">
+                                            <span className="font-bold" dangerouslySetInnerHTML={{ __html: entry.heading }} />
+                                            <span className="font-bold">{entry.right1}</span>
+                                        </div>
+                                        {entry.subheading && (
+                                            <div className="flex justify-between text-[9px] text-gray-600">
+                                                <span className="italic" dangerouslySetInnerHTML={{ __html: entry.subheading }} />
+                                                <span className="italic">{entry.right2}</span>
+                                            </div>
+                                        )}
+                                        {entry.bullets.length > 0 && (
+                                            <ul className="ml-3 mt-0.5 space-y-0">
+                                                {entry.bullets.map((b, k) => (
+                                                    <li key={k} className="text-[9.5px] leading-[1.55] text-gray-800 flex gap-1">
+                                                        <span className="text-[6px] mt-[5px]">●</span>
+                                                        <span dangerouslySetInnerHTML={{ __html: b }} />
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        )) : (
+                            <div className="flex items-center justify-center text-gray-300 text-xs uppercase tracking-widest h-[500px]">
+                                在左侧编辑 LaTeX 代码，预览将实时更新
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
@@ -574,7 +844,7 @@ const ResumeBuilder = ({ userProfile }: { userProfile: UserProfile }) => {
 
 // --- EssayWriter ---
 
-const EssayWriter = ({ userProfile }: { userProfile: UserProfile }) => {
+const EssayWriter = ({ userProfile, userId }: { userProfile: UserProfile, userId: string }) => {
     const [prompt, setPrompt] = useState("");
     const [essay, setEssay] = useState("");
     const [score, setScore] = useState<EssayScore | null>(null);
@@ -582,21 +852,18 @@ const EssayWriter = ({ userProfile }: { userProfile: UserProfile }) => {
     const [wordCount, setWordCount] = useState("650");
     const [essayId, setEssayId] = useState<string | undefined>();
 
-    // Load latest essay from DB
+    // Load latest essay from localStorage
     useEffect(() => {
-        const load = async () => {
-            const essays = await loadEssays();
-            if (essays.length > 0) {
-                const latest = essays[0];
-                setPrompt(latest.prompt);
-                setEssay(latest.content);
-                setScore(latest.score);
-                setEssayId(latest.id);
-                setWordCount(String(latest.wordCount || 650));
-            }
-        };
-        load();
-    }, []);
+        const essays = loadEssays(userId);
+        if (essays.length > 0) {
+            const latest = essays[0];
+            setPrompt(latest.prompt);
+            setEssay(latest.content);
+            setScore(latest.score);
+            setEssayId(latest.id);
+            setWordCount(String(latest.wordCount || 650));
+        }
+    }, [userId]);
 
     const handleGenerate = async () => {
         setIsGenerating(true);
@@ -614,7 +881,7 @@ const EssayWriter = ({ userProfile }: { userProfile: UserProfile }) => {
             setScore(scores);
             setIsGenerating(false);
 
-            const id = await saveEssay({
+            const id = saveEssay(userId, {
                 id: essayId,
                 prompt,
                 content: generated,
@@ -632,9 +899,9 @@ const EssayWriter = ({ userProfile }: { userProfile: UserProfile }) => {
     };
 
     return (
-        <div className="flex h-full bg-luxe-dark text-white relative">
+        <div className="h-full overflow-y-auto bg-luxe-dark text-white relative">
             <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-blue-900/10 rounded-full blur-[120px] pointer-events-none"></div>
-            <div className="flex-1 flex flex-col p-8 pt-6 max-w-5xl mx-auto w-full z-10 gap-8">
+            <div className="flex-1 flex flex-col p-8 pt-6 max-w-5xl mx-auto w-full z-10 gap-8 relative">
                 <header className="flex justify-between items-end border-b border-white/5 pb-6">
                     <div>
                         <h2 className="text-3xl font-serif mb-2">叙事篇章 <span className="text-luxe-gold italic">Essay Crafting</span></h2>
@@ -648,8 +915,8 @@ const EssayWriter = ({ userProfile }: { userProfile: UserProfile }) => {
                     </div>
                 </header>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-full min-h-0">
-                    <div className="lg:col-span-2 flex flex-col gap-6 h-full overflow-hidden">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <div className="lg:col-span-2 flex flex-col gap-6">
                         <div className="bg-luxe-panel border border-white/5 p-6 rounded-2xl shadow-glass space-y-4">
                             <div className="flex justify-between">
                                 <label className="text-[10px] font-bold text-luxe-gold uppercase tracking-[0.2em]">文书题目 (Prompt)</label>
@@ -668,7 +935,7 @@ const EssayWriter = ({ userProfile }: { userProfile: UserProfile }) => {
                             </div>
                         </div>
 
-                        <div className="flex-1 bg-luxe-panel border border-white/5 rounded-2xl p-8 shadow-glass relative group overflow-hidden flex flex-col">
+                        <div className="bg-luxe-panel border border-white/5 rounded-2xl p-8 shadow-glass relative group flex flex-col min-h-[400px]">
                             {isGenerating ? (
                                 <div className="flex-1 flex flex-col items-center justify-center gap-4 text-luxe-gold">
                                     <Sparkles className="w-8 h-8 animate-pulse" />
@@ -757,7 +1024,7 @@ const EssayWriter = ({ userProfile }: { userProfile: UserProfile }) => {
 
 // --- CollegeList ---
 
-const CollegeList = ({ userProfile, onNavigate }: { userProfile: UserProfile, onNavigate: (s: AppSection) => void }) => {
+const CollegeList = ({ userProfile, onNavigate, userId }: { userProfile: UserProfile, onNavigate: (s: AppSection) => void, userId: string }) => {
     const [colleges, setColleges] = useState<College[]>([]);
     const [loading, setLoading] = useState(false);
 
@@ -765,8 +1032,8 @@ const CollegeList = ({ userProfile, onNavigate }: { userProfile: UserProfile, on
         const fetchColleges = async () => {
             if (colleges.length > 0) return;
 
-            // Try loading from DB first
-            const cached = await loadCollegeRecommendations();
+            // Try loading from localStorage first
+            const cached = loadCollegeRecommendations(userId);
             if (cached.length > 0) {
                 setColleges(cached);
                 return;
@@ -777,7 +1044,7 @@ const CollegeList = ({ userProfile, onNavigate }: { userProfile: UserProfile, on
                 setLoading(true);
                 const results = await generateCollegeRecommendations(JSON.stringify(userProfile));
                 setColleges(results);
-                await saveCollegeRecommendations(results);
+                saveCollegeRecommendations(userId, results);
                 setLoading(false);
             }
         };
@@ -788,7 +1055,7 @@ const CollegeList = ({ userProfile, onNavigate }: { userProfile: UserProfile, on
         setLoading(true);
         const results = await generateCollegeRecommendations(JSON.stringify(userProfile));
         setColleges(results);
-        await saveCollegeRecommendations(results);
+        saveCollegeRecommendations(userId, results);
         setLoading(false);
     };
 
@@ -874,6 +1141,10 @@ export default function App() {
     const [activeSection, setActiveSection] = useState<AppSection>(AppSection.HOME);
     const [userProfile, setUserProfile] = useState<UserProfile>({});
     const [showSettings, setShowSettings] = useState(false);
+    const [showClearConfirm, setShowClearConfirm] = useState(false);
+    const [isClearing, setIsClearing] = useState(false);
+    const [clearError, setClearError] = useState('');
+    const [refreshKey, setRefreshKey] = useState(0);
 
     // Auth state listener
     useEffect(() => {
@@ -889,22 +1160,33 @@ export default function App() {
         return () => subscription.unsubscribe();
     }, []);
 
-    // Load profile from Supabase when authenticated
+    // Load profile from localStorage when authenticated
     useEffect(() => {
         if (session) {
-            loadUserProfile().then(profile => {
-                if (Object.keys(profile).length > 0) {
-                    setUserProfile(profile);
-                }
-            });
+            const profile = loadUserProfile(session.user.id);
+            if (Object.keys(profile).length > 0) {
+                setUserProfile(profile);
+            }
         }
     }, [session]);
+
+    const userId = session?.user?.id || '';
 
     const handleLogout = async () => {
         await supabase.auth.signOut();
         setSession(null);
         setUserProfile({});
         setActiveSection(AppSection.HOME);
+    };
+
+    const handleClearAll = () => {
+        if (!userId) return;
+        clearAllUserData(userId);
+        setUserProfile({});
+        setActiveSection(AppSection.HOME);
+        setShowClearConfirm(false);
+        setShowSettings(false);
+        setRefreshKey(k => k + 1);
     };
 
     // Show loading spinner while checking auth
@@ -924,7 +1206,7 @@ export default function App() {
     const SettingsModal = () => (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-luxe-panel border border-white/10 rounded-2xl p-8 max-w-md w-full shadow-2xl relative">
-                <button onClick={() => setShowSettings(false)} className="absolute top-4 right-4 text-gray-500 hover:text-white">✕</button>
+                <button onClick={() => { setShowSettings(false); setShowClearConfirm(false); }} className="absolute top-4 right-4 text-gray-500 hover:text-white">✕</button>
                 <h2 className="text-2xl font-serif text-white mb-6 flex items-center gap-2">
                     <Settings className="w-6 h-6 text-luxe-gold" /> 设置
                 </h2>
@@ -938,7 +1220,53 @@ export default function App() {
                             AI Key 已安全存储在服务端，无需在此配置。
                         </p>
                     </div>
-                    <button onClick={() => setShowSettings(false)}
+
+                    {/* Danger Zone */}
+                    <div className="pt-4 border-t border-red-500/20">
+                        <label className="block text-xs font-bold uppercase tracking-widest text-red-400 mb-3 flex items-center gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5" /> 危险区域
+                        </label>
+                        {!showClearConfirm ? (
+                            <button onClick={() => setShowClearConfirm(true)}
+                                className="w-full py-3 bg-red-500/10 border border-red-500/30 text-red-400 font-bold rounded-lg hover:bg-red-500/20 hover:border-red-500/50 transition-all flex items-center justify-center gap-2">
+                                <Trash2 className="w-4 h-4" /> 清除全部资料
+                            </button>
+                        ) : (
+                            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 space-y-3 animate-in fade-in duration-200">
+                                <p className="text-sm text-red-300 leading-relaxed">
+                                    ⚠️ 确定要清除所有资料吗？这将删除您的：
+                                </p>
+                                <ul className="text-xs text-red-300/70 space-y-1 ml-4 list-disc">
+                                    <li>个人背景画像</li>
+                                    <li>全部聊天记录</li>
+                                    <li>推荐院校列表</li>
+                                    <li>简历内容</li>
+                                    <li>文书与评分</li>
+                                </ul>
+                                <p className="text-xs text-red-400 font-semibold">此操作不可恢复！</p>
+                                {clearError && (
+                                    <div className="p-2 bg-red-900/50 border border-red-500/50 rounded text-xs text-red-300">
+                                        ❌ {clearError}
+                                    </div>
+                                )}
+                                <div className="flex gap-2">
+                                    <button onClick={() => setShowClearConfirm(false)}
+                                        disabled={isClearing}
+                                        className="flex-1 py-2.5 bg-white/5 border border-white/10 text-white text-sm font-semibold rounded-lg hover:bg-white/10 transition-colors">
+                                        取消
+                                    </button>
+                                    <button onClick={handleClearAll}
+                                        disabled={isClearing}
+                                        className="flex-1 py-2.5 bg-red-600 text-white text-sm font-bold rounded-lg hover:bg-red-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-60">
+                                        {isClearing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                                        {isClearing ? '清除中...' : '确认清除'}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <button onClick={() => { setShowSettings(false); setShowClearConfirm(false); }}
                         className="w-full py-3 bg-luxe-gold text-black font-bold rounded-lg hover:bg-white transition-colors mt-4">
                         关闭
                     </button>
@@ -976,13 +1304,13 @@ export default function App() {
                     </div>
                 );
             case AppSection.KNOWLEDGE_BASE:
-                return <KnowledgeBase userProfile={userProfile} setUserProfile={setUserProfile} onNavigate={setActiveSection} />;
+                return <KnowledgeBase userProfile={userProfile} setUserProfile={setUserProfile} onNavigate={setActiveSection} userId={userId} />;
             case AppSection.COLLEGES:
-                return <CollegeList userProfile={userProfile} onNavigate={setActiveSection} />;
+                return <CollegeList userProfile={userProfile} onNavigate={setActiveSection} userId={userId} />;
             case AppSection.RESUME:
-                return <ResumeBuilder userProfile={userProfile} />;
+                return <ResumeBuilder userProfile={userProfile} userId={userId} />;
             case AppSection.ESSAY:
-                return <EssayWriter userProfile={userProfile} />;
+                return <EssayWriter userProfile={userProfile} userId={userId} />;
             case AppSection.AUTO_FILL:
                 return <AutoFill userProfile={userProfile} />;
             default:
@@ -998,7 +1326,7 @@ export default function App() {
                 onOpenSettings={() => setShowSettings(true)}
                 onLogout={handleLogout}
             />
-            <main className="flex-1 h-full relative">
+            <main key={refreshKey} className="flex-1 h-full relative">
                 {renderContent()}
             </main>
             {showSettings && <SettingsModal />}
