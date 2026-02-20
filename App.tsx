@@ -200,29 +200,104 @@ const KnowledgeBase = ({
 
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (file) {
-            const userMsg: Message = {
-                id: Date.now().toString(), role: 'user',
-                content: `已上传文件: ${file.name}`, timestamp: Date.now(),
-                attachments: [{ name: file.name, type: file.type, size: (file.size / 1024).toFixed(1) + 'KB' }]
-            };
-            setMessages(prev => [...prev, userMsg]);
-            saveChatMessage(userMsg);
+        if (!file) return;
 
-            setIsThinking(true);
-            setTimeout(async () => {
-                setIsThinking(false);
-                const aiMsg: Message = {
-                    id: (Date.now() + 1).toString(), role: 'ai',
-                    content: `我已收到并分析了文件 "${file.name}"。其中的关键信息（如 GPA、经历）已自动归档。`,
-                    timestamp: Date.now()
-                };
-                setMessages(prev => [...prev, aiMsg]);
-                await saveChatMessage(aiMsg);
-                const updatedProfile = { ...userProfile, rawText: (userProfile.rawText || '') + `\n[File Content: ${file.name}]` };
-                setUserProfile(updatedProfile);
-                await saveUserProfile(updatedProfile);
-            }, 1500);
+        const userMsg: Message = {
+            id: Date.now().toString(), role: 'user',
+            content: `已上传文件: ${file.name}`, timestamp: Date.now(),
+            attachments: [{ name: file.name, type: file.type, size: (file.size / 1024).toFixed(1) + 'KB' }]
+        };
+        setMessages(prev => [...prev, userMsg]);
+        saveChatMessage(userMsg);
+        setIsThinking(true);
+
+        // Actually read the file content
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            let fileText = event.target?.result as string || '';
+
+            // For PDFs, FileReader gives binary — extract readable text portions
+            if (file.type === 'application/pdf') {
+                // Extract ASCII text from PDF binary (basic but functional extraction)
+                const bytes = new Uint8Array(event.target?.result as ArrayBuffer);
+                const rawStr = Array.from(bytes).map(b => b > 31 && b < 127 ? String.fromCharCode(b) : ' ').join('');
+                // Extract text between BT/ET markers and parentheses in PDF
+                const textMatches = rawStr.match(/\(([^)]+)\)/g);
+                if (textMatches) {
+                    fileText = textMatches.map(m => m.slice(1, -1)).join(' ');
+                } else {
+                    fileText = rawStr.replace(/\s{2,}/g, ' ').trim().substring(0, 5000);
+                }
+            }
+
+            // Truncate if too long
+            const truncatedText = fileText.substring(0, 6000);
+
+            // Send the real file content to AI for analysis
+            const apiHistory = messages.filter(m => !m.type).map(m => ({
+                role: m.role === 'user' ? 'user' : 'model',
+                parts: [{ text: m.content }]
+            }));
+
+            const analysisPrompt = `用户上传了文件 "${file.name}"。以下是文件的内容：
+
+---
+${truncatedText}
+---
+
+请仔细阅读以上文件内容，提取出以下关键信息并总结：
+1. 姓名
+2. GPA（如有）
+3. 专业和学校
+4. 实习/工作经历
+5. 项目经验
+6. 技能特长
+7. 其他值得注意的信息（如 GRE/TOEFL 成绩、获奖等）
+
+请用中文详细总结你从文件中提取到的信息。`;
+
+            const responseText = await sendKnowledgeMessage(apiHistory, analysisPrompt);
+            setIsThinking(false);
+
+            const aiMsg: Message = {
+                id: (Date.now() + 1).toString(), role: 'ai',
+                content: responseText,
+                timestamp: Date.now()
+            };
+            setMessages(prev => [...prev, aiMsg]);
+            await saveChatMessage(aiMsg);
+
+            // Extract profile from the file content + AI analysis
+            const fullContext = JSON.stringify([
+                ...apiHistory,
+                { role: 'user', parts: [{ text: analysisPrompt }] },
+                { role: 'model', parts: [{ text: responseText }] }
+            ]);
+            const extracted = await extractUserProfile(fullContext);
+            const updatedProfile = {
+                ...userProfile,
+                ...extracted,
+                rawText: (userProfile.rawText || '') + '\n' + truncatedText
+            };
+            setUserProfile(updatedProfile);
+            await saveUserProfile(updatedProfile);
+        };
+
+        reader.onerror = () => {
+            setIsThinking(false);
+            const errMsg: Message = {
+                id: (Date.now() + 1).toString(), role: 'ai',
+                content: `文件读取失败，请重试或手动输入信息。`,
+                timestamp: Date.now()
+            };
+            setMessages(prev => [...prev, errMsg]);
+        };
+
+        // Read as text for txt/doc files, as ArrayBuffer for PDFs
+        if (file.type === 'application/pdf') {
+            reader.readAsArrayBuffer(file);
+        } else {
+            reader.readAsText(file);
         }
     };
 
